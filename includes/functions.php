@@ -234,3 +234,59 @@ function getPendingReportCount() {
     $db = getDB();
     return $db->query("SELECT COUNT(*) FROM reports WHERE status = 0")->fetchColumn();
 }
+
+/**
+ * 获取留言总览统计（统一口径）
+ * 口径：已审核通过(status=1)的留言，与分类入口、后台处理结果保持一致
+ */
+function getOverviewStats() {
+    $db = getDB();
+    $stmt = $db->query("SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN type='help' THEN 1 ELSE 0 END) as help_count,
+        SUM(CASE WHEN type='suggest' THEN 1 ELSE 0 END) as suggest_count,
+        SUM(CASE WHEN type='lost' THEN 1 ELSE 0 END) as lost_count
+        FROM messages WHERE status = 1");
+    return $stmt->fetch();
+}
+
+/**
+ * 获取时间区间统计（统一口径）
+ * 新增：区间内创建的留言数（所有状态）
+ * 通过：区间内审核通过的留言数（按 audited_at）
+ * 拒绝：区间内审核拒绝的留言数（按 audited_at）
+ *
+ * @param string $startDate 开始日期 Y-m-d
+ * @param string $endDate 结束日期 Y-m-d
+ * @return array ['new' => int, 'approved' => int, 'rejected' => int]
+ */
+function getMessageRangeStats($startDate, $endDate) {
+    $db = getDB();
+    $start = $startDate . ' 00:00:00';
+    $end = $endDate . ' 23:59:59';
+
+    // 新增：按创建时间统计
+    $stmt = $db->prepare("SELECT COUNT(*) FROM messages WHERE created_at BETWEEN ? AND ?");
+    $stmt->execute([$start, $end]);
+    $new = intval($stmt->fetchColumn());
+
+    // 通过：按审核时间统计
+    $stmt = $db->prepare("SELECT COUNT(*) FROM messages WHERE status = 1 AND audited_at BETWEEN ? AND ?");
+    $stmt->execute([$start, $end]);
+    $approved = intval($stmt->fetchColumn());
+
+    // 拒绝：按审核时间统计
+    $stmt = $db->prepare("SELECT COUNT(*) FROM messages WHERE status = 2 AND audited_at BETWEEN ? AND ?");
+    $stmt->execute([$start, $end]);
+    $rejected = intval($stmt->fetchColumn());
+
+    return ['new' => $new, 'approved' => $approved, 'rejected' => $rejected];
+}
+
+/**
+ * 获取指标显示名称
+ */
+function getMetricLabel($key) {
+    $map = ['new' => '新增', 'approved' => '通过', 'rejected' => '被拒绝'];
+    return $map[$key] ?? $key;
+}

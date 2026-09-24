@@ -27,7 +27,7 @@ switch ($action) {
         $id = intval($_POST['id'] ?? 0);
         $status = intval($_POST['status'] ?? 0);
         if (!in_array($status, [1, 2])) jsonResponse(1, '无效状态');
-        $stmt = $db->prepare("UPDATE messages SET status = ? WHERE id = ?");
+        $stmt = $db->prepare("UPDATE messages SET status = ?, audited_at = NOW() WHERE id = ?");
         $stmt->execute([$status, $id]);
         jsonResponse(0, '操作成功');
         break;

@@ -303,4 +303,359 @@ function submitReport() {
 
 document.addEventListener('DOMContentLoaded', function() {
     initReportForm();
+    initCompareModule();
 });
+
+/**
+ * 区间对比模块
+ * 支持今天、近七天、自定义区间切换
+ * 状态保持：localStorage 保存所选区间
+ * 容错：请求失败时保留上次结果并标出未完成区间
+ */
+const CompareModule = {
+    // 配置
+    storageKeys: {
+        range: 'compare_range',
+        customStart: 'compare_custom_start',
+        customEnd: 'compare_custom_end',
+        lastResult: 'compare_last_result'
+    },
+
+    // 状态
+    currentRange: 'today',
+    customStart: '',
+    customEnd: '',
+    lastResult: null,
+    isStale: false,
+
+    /**
+     * 初始化
+     */
+    init() {
+        const container = document.getElementById('compareBody');
+        if (!container) return;
+
+        // 从 localStorage 恢复状态
+        this.restoreState();
+
+        // 绑定事件
+        this.bindEvents();
+
+        // 设置自定义区间输入框的值
+        this.setCustomInputs();
+
+        // 加载数据
+        this.loadData();
+    },
+
+    /**
+     * 从 localStorage 恢复状态
+     */
+    restoreState() {
+        this.currentRange = localStorage.getItem(this.storageKeys.range) || 'today';
+        this.customStart = localStorage.getItem(this.storageKeys.customStart) || '';
+        this.customEnd = localStorage.getItem(this.storageKeys.customEnd) || '';
+
+        const lastResultStr = localStorage.getItem(this.storageKeys.lastResult);
+        if (lastResultStr) {
+            try {
+                this.lastResult = JSON.parse(lastResultStr);
+            } catch (e) {
+                this.lastResult = null;
+            }
+        }
+
+        // 更新标签页状态
+        this.updateTabs();
+
+        // 显示/隐藏自定义区间
+        this.toggleCustomRange();
+    },
+
+    /**
+     * 保存状态到 localStorage
+     */
+    saveState() {
+        localStorage.setItem(this.storageKeys.range, this.currentRange);
+        if (this.currentRange === 'custom') {
+            localStorage.setItem(this.storageKeys.customStart, this.customStart);
+            localStorage.setItem(this.storageKeys.customEnd, this.customEnd);
+        }
+    },
+
+    /**
+     * 绑定事件
+     */
+    bindEvents() {
+        // 标签页切换
+        document.querySelectorAll('.range-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.currentRange = tab.dataset.range;
+                this.updateTabs();
+                this.toggleCustomRange();
+                this.saveState();
+
+                // 非自定义区间直接加载
+                if (this.currentRange !== 'custom') {
+                    this.loadData();
+                } else if (this.customStart && this.customEnd) {
+                    // 自定义区间且有日期时自动加载
+                    this.loadData();
+                }
+            });
+        });
+
+        // 日期输入变化
+        const startInput = document.getElementById('startDate');
+        const endInput = document.getElementById('endDate');
+        if (startInput) {
+            startInput.addEventListener('change', () => {
+                this.customStart = startInput.value;
+            });
+        }
+        if (endInput) {
+            endInput.addEventListener('change', () => {
+                this.customEnd = endInput.value;
+            });
+        }
+
+        // 查询按钮
+        const queryBtn = document.getElementById('queryBtn');
+        if (queryBtn) {
+            queryBtn.addEventListener('click', () => {
+                this.customStart = startInput ? startInput.value : '';
+                this.customEnd = endInput ? endInput.value : '';
+                if (!this.customStart || !this.customEnd) {
+                    this.showNotice('请选择开始和结束日期', 'error');
+                    return;
+                }
+                this.saveState();
+                this.loadData();
+            });
+        }
+    },
+
+    /**
+     * 更新标签页状态
+     */
+    updateTabs() {
+        document.querySelectorAll('.range-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.range === this.currentRange);
+        });
+    },
+
+    /**
+     * 切换自定义区间显示
+     */
+    toggleCustomRange() {
+        const customRange = document.getElementById('customRange');
+        if (customRange) {
+            customRange.style.display = this.currentRange === 'custom' ? 'flex' : 'none';
+        }
+    },
+
+    /**
+     * 设置自定义区间输入框的值
+     */
+    setCustomInputs() {
+        const startInput = document.getElementById('startDate');
+        const endInput = document.getElementById('endDate');
+
+        // 设置默认值为最近7天
+        const today = new Date();
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 6);
+
+        if (startInput) {
+            startInput.value = this.customStart || this.formatDate(weekAgo);
+            startInput.max = this.formatDate(today);
+        }
+        if (endInput) {
+            endInput.value = this.customEnd || this.formatDate(today);
+            endInput.max = this.formatDate(today);
+        }
+    },
+
+    /**
+     * 格式化日期为 YYYY-MM-DD
+     */
+    formatDate(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    },
+
+    /**
+     * 加载数据
+     */
+    loadData() {
+        const container = document.getElementById('compareBody');
+        if (!container) return;
+
+        // 显示加载状态
+        container.innerHTML = '<div class="compare-loading">加载中...</div>';
+        this.hideNotice();
+
+        // 构建请求 URL
+        let url = 'api/stats.php?range=' + this.currentRange;
+        if (this.currentRange === 'custom') {
+            url += '&start=' + encodeURIComponent(this.customStart);
+            url += '&end=' + encodeURIComponent(this.customEnd);
+        }
+
+        fetch(url)
+            .then(response => response.json())
+            .then(result => {
+                if (result.code === 0) {
+                    // 成功：渲染数据并保存
+                    this.lastResult = result.data;
+                    this.isStale = false;
+                    localStorage.setItem(this.storageKeys.lastResult, JSON.stringify(result.data));
+                    this.render(result.data);
+
+                    // 显示警告信息
+                    if (result.data.warnings && result.data.warnings.length > 0) {
+                        this.showNotice(result.data.warnings.join('；'), 'warning');
+                    }
+                } else {
+                    // 失败：保留上次结果并标出未完成
+                    this.handleError(result.msg, result.data);
+                }
+            })
+            .catch(error => {
+                console.error('加载对比数据失败:', error);
+                this.handleError('网络错误，请稍后重试', null);
+            });
+    },
+
+    /**
+     * 处理错误：保留上次结果并标出未完成区间
+     */
+    handleError(msg, errorData) {
+        if (this.lastResult) {
+            // 有上次结果：显示上次结果并标记为过期
+            this.isStale = true;
+            this.render(this.lastResult, true);
+            this.showNotice(msg + '，显示上次结果', 'error');
+        } else {
+            // 无上次结果：显示错误
+            const container = document.getElementById('compareBody');
+            if (container) {
+                container.innerHTML = '<div class="compare-loading">数据加载失败：' + msg + '</div>';
+            }
+            this.showNotice(msg, 'error');
+        }
+    },
+
+    /**
+     * 渲染对比数据
+     */
+    render(data, isStale = false) {
+        const container = document.getElementById('compareBody');
+        if (!container) return;
+
+        const metrics = [
+            { key: 'new', label: '新增', icon: '📝' },
+            { key: 'approved', label: '通过', icon: '✅' },
+            { key: 'rejected', label: '被拒绝', icon: '❌' }
+        ];
+
+        let html = '<div class="compare-grid' + (isStale ? ' compare-stale' : '') + '">';
+
+        metrics.forEach(metric => {
+            const current = data.current[metric.key];
+            const previous = data.previous[metric.key];
+            const change = data.changes[metric.key];
+
+            let changeHtml = '';
+            let changeClass = 'change-flat';
+            let changeIcon = '→';
+
+            if (change.no_history) {
+                changeHtml = '<span class="change-flat">无对比数据</span>';
+            } else if (change.percent !== null) {
+                if (change.percent > 0) {
+                    changeClass = 'change-up';
+                    changeIcon = '↑';
+                } else if (change.percent < 0) {
+                    changeClass = 'change-down';
+                    changeIcon = '↓';
+                }
+                changeHtml = '<span class="' + changeClass + '">' + changeIcon + ' ' + Math.abs(change.percent) + '%</span>';
+            }
+
+            // 异常标记
+            let abnormalBadge = '';
+            if (change.abnormal) {
+                abnormalBadge = '<span class="change-abnormal">异常</span>';
+            }
+
+            html += `
+                <div class="compare-item${change.abnormal ? ' abnormal' : ''}">
+                    <div class="compare-item-label">${metric.icon} ${metric.label}${abnormalBadge}</div>
+                    <div class="compare-item-value">${current}</div>
+                    <div class="compare-item-change">${changeHtml}</div>
+                    <div class="compare-item-previous">上期: ${previous}</div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+
+        // 区间信息
+        const rangeInfo = this.formatRangeInfo(data, isStale);
+        html += '<div class="compare-range-info">' + rangeInfo + '</div>';
+
+        container.innerHTML = html;
+    },
+
+    /**
+     * 格式化区间信息
+     */
+    formatRangeInfo(data, isStale) {
+        let info = `当前区间: ${data.current.start} ~ ${data.current.end}`;
+        info += ` | 对比区间: ${data.previous.start} ~ ${data.previous.end}`;
+
+        if (isStale) {
+            info += ' <span class="incomplete-badge">数据未更新</span>';
+        }
+
+        if (data.incomplete && data.incomplete.length > 0) {
+            const labels = { current: '当前区间', previous: '对比区间' };
+            const incompleteLabels = data.incomplete.map(k => labels[k] || k).join('、');
+            info += ` <span class="incomplete-badge">${incompleteLabels}未完成</span>`;
+        }
+
+        return info;
+    },
+
+    /**
+     * 显示提示信息
+     */
+    showNotice(msg, type = 'warning') {
+        const notice = document.getElementById('compareNotice');
+        if (notice) {
+            notice.textContent = msg;
+            notice.className = 'compare-notice' + (type === 'error' ? ' error' : '');
+            notice.style.display = 'block';
+        }
+    },
+
+    /**
+     * 隐藏提示信息
+     */
+    hideNotice() {
+        const notice = document.getElementById('compareNotice');
+        if (notice) {
+            notice.style.display = 'none';
+        }
+    }
+};
+
+/**
+ * 初始化区间对比模块
+ */
+function initCompareModule() {
+    CompareModule.init();
+}

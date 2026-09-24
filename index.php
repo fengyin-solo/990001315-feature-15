@@ -48,14 +48,8 @@ $favoritedIds = array_flip($favoritedIds);
 $scrollStmt = $db->query("SELECT id, type, title, created_at FROM messages WHERE status = 1 ORDER BY created_at DESC LIMIT 8");
 $scrollMessages = $scrollStmt->fetchAll();
 
-// 统计
-$statsStmt = $db->query("SELECT 
-    COUNT(*) as total,
-    SUM(CASE WHEN type='help' THEN 1 ELSE 0 END) as help_count,
-    SUM(CASE WHEN type='suggest' THEN 1 ELSE 0 END) as suggest_count,
-    SUM(CASE WHEN type='lost' THEN 1 ELSE 0 END) as lost_count
-    FROM messages WHERE status = 1");
-$stats = $statsStmt->fetch();
+// 统计（使用统一口径函数，确保与分类入口、后台数据一致）
+$stats = getOverviewStats();
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -97,6 +91,32 @@ include __DIR__ . '/includes/header.php';
             <div class="stat-card stat-lost">
                 <div class="stat-number"><?= $stats['lost_count'] ?? 0 ?></div>
                 <div class="stat-label">🔍 失物招领</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- 区间对比 -->
+<section class="compare-section">
+    <div class="container">
+        <div class="compare-card">
+            <div class="compare-header">
+                <h3 class="compare-title">📊 区间对比</h3>
+                <div class="range-tabs">
+                    <button type="button" class="range-tab" data-range="today">今天</button>
+                    <button type="button" class="range-tab" data-range="week">近七天</button>
+                    <button type="button" class="range-tab" data-range="custom">自定义</button>
+                </div>
+            </div>
+            <div class="custom-range" id="customRange" style="display:none;">
+                <input type="date" id="startDate" class="date-input">
+                <span class="date-sep">至</span>
+                <input type="date" id="endDate" class="date-input">
+                <button type="button" class="btn btn-primary btn-sm" id="queryBtn">查询</button>
+            </div>
+            <div class="compare-notice" id="compareNotice" style="display:none;"></div>
+            <div class="compare-body" id="compareBody">
+                <div class="compare-loading">加载中...</div>
             </div>
         </div>
     </div>
