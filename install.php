@@ -73,6 +73,26 @@ try {
         FOREIGN KEY (`processed_by`) REFERENCES `admins`(`id`) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='举报表'");
 
+    // 应用元数据表（记录审核流水基线等）
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `app_meta` (
+        `meta_key` VARCHAR(64) NOT NULL PRIMARY KEY,
+        `meta_value` VARCHAR(255) NOT NULL,
+        `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='应用键值元数据'");
+
+    // 留言审核状态流水表（区间统计“通过/拒绝”数量的唯一口径，不加外键，留言删除后流水保留）
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `message_status_logs` (
+        `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        `message_id` INT UNSIGNED NOT NULL COMMENT '留言ID（留言删除后仍保留流水）',
+        `from_status` TINYINT DEFAULT NULL COMMENT '原状态: 0待审核, 1已通过, 2已拒绝',
+        `to_status` TINYINT NOT NULL COMMENT '新状态: 1已通过, 2已拒绝',
+        `admin_id` INT UNSIGNED DEFAULT NULL COMMENT '操作管理员ID',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '审核动作时间',
+        INDEX `idx_status_time` (`to_status`, `created_at`),
+        INDEX `idx_message_id` (`message_id`),
+        INDEX `idx_created` (`created_at`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='留言审核状态流水'");
+
     // 插入默认管理员 admin/admin123
     $hash = password_hash('admin123', PASSWORD_DEFAULT);
     $stmt = $pdo->prepare("INSERT IGNORE INTO `admins` (`username`, `password`) VALUES ('admin', ?)");
@@ -91,6 +111,17 @@ try {
     $stmt = $pdo->prepare("INSERT INTO `messages` (`nickname`, `phone`, `type`, `title`, `content`, `image`, `status`, `views`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     foreach ($testData as $i => $d) {
         $stmt->execute([$d[0], $d[1], $d[2], $d[3], $d[4], $d[5], $d[6], rand(10, 200)]);
+    }
+
+    // 将存量已审核留言回填到审核流水（以 updated_at 估算审核时间），并记录基线
+    $hasBaseline = $pdo->query("SELECT COUNT(*) FROM app_meta WHERE meta_key = 'audit_log_baseline'")->fetchColumn();
+    if (!$hasBaseline) {
+        $pdo->exec("INSERT INTO message_status_logs (message_id, from_status, to_status, admin_id, created_at)
+            SELECT id, 0, status, NULL, updated_at
+            FROM messages
+            WHERE status IN (1, 2) AND updated_at IS NOT NULL");
+        $stmt = $pdo->prepare("INSERT INTO app_meta (meta_key, meta_value) VALUES ('audit_log_baseline', ?)");
+        $stmt->execute([date('Y-m-d H:i:s')]);
     }
 
     // 创建上传目录

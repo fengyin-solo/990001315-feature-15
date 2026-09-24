@@ -828,8 +828,151 @@ a:hover { color: var(--primary-dark); }
     .report-type-options {
         grid-template-columns: 1fr;
     }
-    
+
     .report-text {
         display: none;
     }
+}
+
+/* ========== Stats Cards as Entries ========== */
+a.stat-card {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}
+a.stat-card:hover { color: inherit; }
+
+/* ========== Trend / Period Comparison ========== */
+.trend-section { padding: 0 0 24px; }
+.trend-card {
+    background: #fff;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px 24px;
+}
+.trend-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.trend-title { font-size: 1.05rem; color: var(--gray-800); }
+.trend-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.range-tab {
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: .85rem;
+    background: var(--gray-100);
+    color: var(--gray-600);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.range-tab:hover { background: var(--gray-200); }
+.range-tab.active {
+    background: var(--primary);
+    color: #fff;
+}
+.custom-range-picker {
+    display: none;
+    align-items: center;
+    gap: 6px;
+}
+.custom-range-picker input[type="date"] {
+    padding: 5px 8px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    font-size: .85rem;
+    color: var(--gray-700);
+}
+.range-sep { color: var(--gray-400); font-size: .85rem; }
+
+.trend-alerts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+.trend-alert {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    font-size: .8rem;
+    line-height: 1.4;
+}
+.trend-alert-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.trend-alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+.trend-alert-warn { background: #fffbeb; color: #92400e; border: 1px dashed #fcd34d; }
+.trend-alert-info { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+.trend-alert:empty { display: none; }
+
+.trend-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+}
+.metric-card {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    transition: var(--transition);
+}
+.metric-card.metric-anomaly {
+    background: #fef2f2;
+    border-color: #fecaca;
+    box-shadow: 0 0 0 1px #fecaca inset;
+}
+.metric-label { font-size: .85rem; color: var(--gray-500); }
+.metric-current { margin: 6px 0 8px; }
+.metric-value { font-size: 1.8rem; font-weight: 800; color: var(--gray-800); }
+.metric-card.metric-anomaly .metric-value { color: var(--danger); }
+.metric-change { min-height: 24px; }
+.metric-note { font-size: .75rem; color: var(--danger); margin-top: 4px; min-height: 18px; }
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 16px;
+    font-size: .78rem;
+    white-space: nowrap;
+}
+.chip-up { background: #dcfce7; color: #166534; }
+.chip-down { background: var(--gray-100); color: var(--gray-600); }
+.chip-flat { background: var(--gray-100); color: var(--gray-500); }
+.chip-muted { background: var(--gray-100); color: var(--gray-400); }
+.chip-anomaly {
+    background: #fee2e2;
+    color: #991b1b;
+    font-weight: 600;
+    animation: anomalyPulse 1.6s ease-in-out infinite;
+}
+@keyframes anomalyPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .35); }
+    50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+}
+
+.trend-footer {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid var(--gray-100);
+    font-size: .78rem;
+    color: var(--gray-400);
+}
+
+@media (max-width: 768px) {
+    .trend-metrics { grid-template-columns: 1fr; }
+    .trend-header { flex-direction: column; align-items: flex-start; }
+    .custom-range-picker { width: 100%; flex-wrap: wrap; }
+    .custom-range-picker input[type="date"] { flex: 1; min-width: 130px; }
 }

@@ -303,4 +303,210 @@ function submitReport() {
 
 document.addEventListener('DOMContentLoaded', function() {
     initReportForm();
+    initTrendPanel();
 });
+
+/* ========== 运营区间对比 ========== */
+
+const TREND_STORAGE_KEY = 'board_stats_range';
+
+/**
+ * 区间对比面板：切换今天/近七天/自定义，
+ * 请求失败或区间异常时保留上次结果，并标出未完成区间。
+ */
+function initTrendPanel() {
+    const panel = document.getElementById('trendPanel');
+    if (!panel) return;
+
+    const tabs = panel.querySelectorAll('.range-tab');
+    const startInput = document.getElementById('customStart');
+    const endInput = document.getElementById('customEnd');
+    const applyBtn = document.getElementById('customApply');
+
+    // 上次成功获取的结果，异常时继续展示
+    let lastData = null;
+    let lastRange = null;
+
+    // 读取上次所选区间（再次进入仍保留）
+    const saved = loadSavedRange();
+    let state = {
+        range: saved.range,
+        start: saved.start || '',
+        end: saved.end || ''
+    };
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            const range = this.dataset.range;
+            state.range = range;
+            if (range === 'custom' && (!state.start || !state.end)) {
+                // 仅切换到自定义页签，选好日期点“应用”后才重新计算
+                renderTabs();
+                return;
+            }
+            loadStats(true);
+        });
+    });
+
+    applyBtn.addEventListener('click', function() {
+        const start = startInput.value;
+        const end = endInput.value;
+        if (!start || !end) {
+            showToast('请选择开始和结束日期', 'warning');
+            return;
+        }
+        if (start > end) {
+            showToast('开始日期不能晚于结束日期', 'warning');
+            return;
+        }
+        state.start = start;
+        state.end = end;
+        loadStats(true);
+    });
+
+    renderTabs();
+    loadStats(false);
+
+    function renderTabs() {
+        tabs.forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.range === state.range);
+        });
+        panel.querySelector('.custom-range-picker').style.display =
+            state.range === 'custom' ? 'inline-flex' : 'none';
+        if (state.range === 'custom') {
+            startInput.value = state.start || '';
+            endInput.value = state.end || '';
+        }
+    }
+
+    function loadStats(showErrorToast) {
+        let url = 'api/stats.php?range=' + encodeURIComponent(state.range);
+        if (state.range === 'custom') {
+            url += '&start=' + encodeURIComponent(state.start) + '&end=' + encodeURIComponent(state.end);
+        }
+
+        fetch(url, {headers: {'Accept': 'application/json'}})
+            .then(r => r.json())
+            .then(res => {
+                if (res.code !== 0 || !res.data) {
+                    // 计算异常/区间过大：保留上次结果
+                    if (showErrorToast) showToast(res.msg || '统计失败，已保留上次结果', 'warning');
+                    keepLastResult(res.msg || '统计暂时不可用');
+                    return;
+                }
+                lastData = res.data;
+                lastRange = {range: state.range, start: state.start, end: state.end};
+                saveRange(lastRange);
+                renderTabs();
+                render(res.data);
+            })
+            .catch(() => {
+                // 网络错误：同样保留上次结果
+                if (showErrorToast) showToast('网络错误，已保留上次结果', 'warning');
+                keepLastResult('网络异常，已保留上次结果');
+            });
+    }
+
+    function keepLastResult(message) {
+        renderTabs();
+        if (lastData) {
+            render(lastData, true, message);
+        } else {
+            document.getElementById('trendAlerts').innerHTML =
+                '<span class="trend-alert trend-alert-warning">' + escHtml(message) + '</span>';
+            document.getElementById('trendFooter').textContent = '';
+        }
+    }
+
+    function render(data, stale, staleMessage) {
+        const labels = {new: '新增留言', approved: '审核通过', rejected: '被拒绝'};
+
+        panel.querySelectorAll('.metric-card').forEach(card => {
+            const key = card.dataset.metric;
+            const m = data.current.metrics[key];
+            const valueEl = card.querySelector('[data-field="value"]');
+            const changeEl = card.querySelector('[data-field="change"]');
+            const noteEl = card.querySelector('[data-field="note"]');
+
+            valueEl.textContent = m.current;
+            card.classList.toggle('metric-anomaly', !!m.change.anomaly);
+            changeEl.className = 'metric-change';
+            noteEl.textContent = '';
+
+            if (m.previous === null) {
+                // 缺少历史数据（上一区间早于建板时间）
+                changeEl.innerHTML = '<span class="chip chip-muted">环比 —</span>';
+                noteEl.textContent = '上期缺少历史数据';
+            } else if (m.change.direction === 'flat') {
+                changeEl.innerHTML = '<span class="chip chip-flat">环比持平 · 上期 ' + m.previous + '</span>';
+            } else {
+                const up = m.change.direction === 'up';
+                const sign = up ? '+' : '';
+                let text = '环比 ' + sign + m.change.diff + ' 件';
+                if (m.change.percent !== null) {
+                    text += '（' + sign + m.change.percent + '%）';
+                }
+                text += ' · 上期 ' + m.previous;
+                const cls = m.change.anomaly
+                    ? 'chip-anomaly'
+                    : (up ? 'chip-up' : 'chip-down');
+                const icon = m.change.anomaly ? '⚠️ ' : (up ? '▲ ' : '▼ ');
+                changeEl.innerHTML = '<span class="chip ' + cls + '">' + icon + escHtml(text) + '</span>';
+                if (m.change.anomaly) {
+                    noteEl.textContent = up ? '较上期异常增加，请关注' : '较上期异常下降，请关注';
+                }
+            }
+        });
+
+        // 顶部提示条：异常变化 + 估算 + 未完成/保留标记
+        const alerts = [];
+        (data.anomalies || []).forEach(text => {
+            alerts.push('<span class="trend-alert trend-alert-danger">⚠️ ' + escHtml(text) + '</span>');
+        });
+        if (data.estimated) {
+            alerts.push('<span class="trend-alert trend-alert-info">ℹ️ 审核流水上线前的通过/拒绝数据按记录更新时间估算</span>');
+        }
+        if (data.incomplete) {
+            alerts.push('<span class="trend-alert trend-alert-warn">🕒 当前区间尚未结束，数据为截至目前的实时值</span>');
+        }
+        if (stale && staleMessage) {
+            alerts.push('<span class="trend-alert trend-alert-warning">' + escHtml(staleMessage) + '</span>');
+        }
+        document.getElementById('trendAlerts').innerHTML = alerts.join('');
+
+        let footer = '本期：' + fmtTime(data.current.start) + ' — ' + fmtTime(data.current.end);
+        if (data.previous.available) {
+            footer += '　|　上期：' + fmtTime(data.previous.start) + ' — ' + fmtTime(data.previous.end);
+        }
+        document.getElementById('trendFooter').textContent = footer;
+    }
+
+    function loadSavedRange() {
+        try {
+            const raw = localStorage.getItem(TREND_STORAGE_KEY);
+            if (!raw) return {range: 'today'};
+            const parsed = JSON.parse(raw);
+            if (['today', '7d', 'custom'].indexOf(parsed.range) === -1) return {range: 'today'};
+            if (parsed.range === 'custom' && (!parsed.start || !parsed.end)) return {range: 'today'};
+            return parsed;
+        } catch (e) {
+            return {range: 'today'};
+        }
+    }
+
+    function saveRange(range) {
+        try {
+            localStorage.setItem(TREND_STORAGE_KEY, JSON.stringify(range));
+        } catch (e) { /* 隐私模式等场景下忽略 */ }
+    }
+
+    function fmtTime(s) {
+        return s ? s.substring(5, 16) : '';
+    }
+
+    function escHtml(s) {
+        return String(s).replace(/[&<>"']/g, ch => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+    }
+}

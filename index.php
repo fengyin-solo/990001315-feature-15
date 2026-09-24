@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/includes/stats.php';
 
 $pageTitle = '社区便民留言板 - 首页';
 $currentPage = 'home';
@@ -8,6 +9,9 @@ $cssPath = 'assets/css/style.css';
 $jsPath = 'assets/js/main.js';
 
 $db = getDB();
+
+// 确保审核流水表可用（幂等），后台审核与首页区间统计共用同一口径
+ensureStatsSchema($db);
 
 // 获取排序参数
 $sort = $_GET['sort'] ?? 'time';
@@ -48,14 +52,8 @@ $favoritedIds = array_flip($favoritedIds);
 $scrollStmt = $db->query("SELECT id, type, title, created_at FROM messages WHERE status = 1 ORDER BY created_at DESC LIMIT 8");
 $scrollMessages = $scrollStmt->fetchAll();
 
-// 统计
-$statsStmt = $db->query("SELECT 
-    COUNT(*) as total,
-    SUM(CASE WHEN type='help' THEN 1 ELSE 0 END) as help_count,
-    SUM(CASE WHEN type='suggest' THEN 1 ELSE 0 END) as suggest_count,
-    SUM(CASE WHEN type='lost' THEN 1 ELSE 0 END) as lost_count
-    FROM messages WHERE status = 1");
-$stats = $statsStmt->fetch();
+// 统计（总览与分类入口、后台处理结果使用同一口径：当前 status=1）
+$stats = getOverviewStats($db);
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -78,26 +76,73 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<!-- 统计卡片 -->
+<!-- 统计卡片（数字与分类列表、后台筛选同一口径） -->
 <section class="stats-section">
     <div class="container">
         <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-number"><?= $stats['total'] ?? 0 ?></div>
+            <a href="index.php?sort=time" class="stat-card">
+                <div class="stat-number"><?= $stats['total'] ?></div>
                 <div class="stat-label">全部留言</div>
-            </div>
-            <div class="stat-card stat-help">
-                <div class="stat-number"><?= $stats['help_count'] ?? 0 ?></div>
+            </a>
+            <a href="index.php?type=help" class="stat-card stat-help">
+                <div class="stat-number"><?= $stats['help_count'] ?></div>
                 <div class="stat-label">🆘 居民求助</div>
-            </div>
-            <div class="stat-card stat-suggest">
-                <div class="stat-number"><?= $stats['suggest_count'] ?? 0 ?></div>
+            </a>
+            <a href="index.php?type=suggest" class="stat-card stat-suggest">
+                <div class="stat-number"><?= $stats['suggest_count'] ?></div>
                 <div class="stat-label">💡 意见建议</div>
-            </div>
-            <div class="stat-card stat-lost">
-                <div class="stat-number"><?= $stats['lost_count'] ?? 0 ?></div>
+            </a>
+            <a href="index.php?type=lost" class="stat-card stat-lost">
+                <div class="stat-number"><?= $stats['lost_count'] ?></div>
                 <div class="stat-label">🔍 失物招领</div>
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- 运营区间对比 -->
+<section class="trend-section" id="trendPanel">
+    <div class="container">
+        <div class="trend-card">
+            <div class="trend-header">
+                <h3 class="trend-title">📊 运营数据对比</h3>
+                <div class="trend-range" role="tablist">
+                    <button type="button" class="range-tab" data-range="today">今天</button>
+                    <button type="button" class="range-tab" data-range="7d">近七天</button>
+                    <button type="button" class="range-tab" data-range="custom">自定义</button>
+                    <span class="custom-range-picker">
+                        <input type="date" id="customStart" max="<?= date('Y-m-d') ?>">
+                        <span class="range-sep">至</span>
+                        <input type="date" id="customEnd" max="<?= date('Y-m-d') ?>">
+                        <button type="button" class="btn btn-primary btn-sm" id="customApply">应用</button>
+                    </span>
+                </div>
             </div>
+
+            <div class="trend-alerts" id="trendAlerts" aria-live="polite"></div>
+
+            <div class="trend-metrics" id="trendMetrics">
+                <div class="metric-card" data-metric="new">
+                    <div class="metric-label">✍️ 新增留言</div>
+                    <div class="metric-current"><span class="metric-value" data-field="value">—</span></div>
+                    <div class="metric-change" data-field="change"></div>
+                    <div class="metric-note" data-field="note"></div>
+                </div>
+                <div class="metric-card" data-metric="approved">
+                    <div class="metric-label">✅ 审核通过</div>
+                    <div class="metric-current"><span class="metric-value" data-field="value">—</span></div>
+                    <div class="metric-change" data-field="change"></div>
+                    <div class="metric-note" data-field="note"></div>
+                </div>
+                <div class="metric-card" data-metric="rejected">
+                    <div class="metric-label">🚫 被拒绝</div>
+                    <div class="metric-current"><span class="metric-value" data-field="value">—</span></div>
+                    <div class="metric-change" data-field="change"></div>
+                    <div class="metric-note" data-field="note"></div>
+                </div>
+            </div>
+
+            <div class="trend-footer" id="trendFooter"></div>
         </div>
     </div>
 </section>

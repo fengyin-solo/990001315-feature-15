@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/stats.php';
 requireAdmin();
 
 header('Content-Type: application/json; charset=utf-8');
@@ -27,8 +28,33 @@ switch ($action) {
         $id = intval($_POST['id'] ?? 0);
         $status = intval($_POST['status'] ?? 0);
         if (!in_array($status, [1, 2])) jsonResponse(1, '无效状态');
-        $stmt = $db->prepare("UPDATE messages SET status = ? WHERE id = ?");
-        $stmt->execute([$status, $id]);
+
+        // 状态变更与审核流水在同一事务内提交，保证首页统计与后台处理结果一致
+        try {
+            if (!ensureStatsSchema($db)) jsonResponse(1, '统计服务暂不可用，请稍后重试');
+
+            $db->beginTransaction();
+            $stmt = $db->prepare("SELECT status FROM messages WHERE id = ? FOR UPDATE");
+            $stmt->execute([$id]);
+            $oldStatus = $stmt->fetchColumn();
+            if ($oldStatus === false) {
+                $db->rollBack();
+                jsonResponse(1, '留言不存在');
+            }
+
+            $stmt = $db->prepare("UPDATE messages SET status = ? WHERE id = ?");
+            $stmt->execute([$status, $id]);
+
+            // 仅在状态实际发生变化时记录一次审核动作
+            if ((int)$oldStatus !== $status) {
+                logStatusChange($db, $id, (int)$oldStatus, $status, (int)$_SESSION['admin_id']);
+            }
+
+            $db->commit();
+        } catch (Exception $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            jsonResponse(1, '操作失败: ' . $e->getMessage());
+        }
         jsonResponse(0, '操作成功');
         break;
 
